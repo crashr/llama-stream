@@ -1,4 +1,4 @@
-# Configuration for the Reverse Proxy
+# Configuration for the llama-stream Reverse Proxy
 
 # Port on which the reverse proxy server will listen
 proxy_port: 8066
@@ -29,7 +29,7 @@ allowed_get_paths:
   - "/v1/chat/completion"
 
 # Optional: Set default request timeout for requests to the target server (in seconds)
-# request_timeout: 10 # Default is no specific timeout by requests library, can be long
+# request_timeout: 10
 
 # Optional: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 log_level: "INFO"
