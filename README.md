@@ -32,7 +32,7 @@ Specifically, if your application expects to receive `delta` updates containing 
 
 ## Features
 
-*   **Simulated Streaming for Tool Calls:** Converts `llama-server`'s non-streamed tool call responses into an OpenAI-compatible `text/event-stream`.
+*   **Simulated Streaming for Tool Calls:** Converts `llama-server`'s non-streamed tool call responses into an OpenAI-compatible `text/event-stream`. Tool calling support was added by [@PrideIsLife](https://gist.github.com/PrideIsLife)
 *   **Configurable:** All key parameters (ports, target server URL, SSL verification) are managed via a `config.yaml` file.
 *   **Flexible Target Server Connection:**
     *   Connects to HTTP backends.
