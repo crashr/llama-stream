@@ -24,13 +24,9 @@ streaming_chunk_size: 50
 # Optional: Specify allowed paths for GET requests.
 # If not specified or empty, all GET paths will be attempted (and likely result in 404 if not /v1/models by current logic).
 # For now, the logic only explicitly handles /v1/models.
-# Example:
-# allowed_get_paths:
-#   - "/v1/models"
-#   - "/another/path"
-# If you want more flexible path routing, the Python code would need to be significantly enhanced.
-# The current implementation primarily focuses on /v1/models for GET.
-# All POST requests are proxied, but only those that return a 200 with JSON are streamed.
+allowed_get_paths:
+  - "/v1/models"
+  - "/v1/chat/completion"
 
 # Optional: Set default request timeout for requests to the target server (in seconds)
 # request_timeout: 10 # Default is no specific timeout by requests library, can be long
