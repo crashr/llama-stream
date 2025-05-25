@@ -1,0 +1,39 @@
+# Configuration for the Reverse Proxy
+
+# Port on which the reverse proxy server will listen
+proxy_port: 8066
+
+# Target server configuration
+# This is the backend server to which requests will be forwarded.
+# Examples:
+#   For HTTP: "http://backend-service:8000"
+#   For HTTPS with certificate verification: "https://api.example.com"
+#   For HTTPS ignoring certificate errors (e.g., self-signed certs in dev): "https://localhost:8443"
+target_url: "http://localhost:8055" # Replace with your actual target
+
+# SSL verification for the target server (only applicable if target_url starts with "https://")
+# true: Verify SSL certificate (default if target is HTTPS and this key is missing)
+# false: Do not verify SSL certificate (useful for self-signed certificates)
+# string: Path to a CA bundle file or directory with certificates of trusted CAs
+verify_ssl: true
+
+# For the _simulate_streaming function in POST requests
+# Defines the chunk size for simulating streaming of text content.
+streaming_chunk_size: 50
+
+# Optional: Specify allowed paths for GET requests.
+# If not specified or empty, all GET paths will be attempted (and likely result in 404 if not /v1/models by current logic).
+# For now, the logic only explicitly handles /v1/models.
+# Example:
+# allowed_get_paths:
+#   - "/v1/models"
+#   - "/another/path"
+# If you want more flexible path routing, the Python code would need to be significantly enhanced.
+# The current implementation primarily focuses on /v1/models for GET.
+# All POST requests are proxied, but only those that return a 200 with JSON are streamed.
+
+# Optional: Set default request timeout for requests to the target server (in seconds)
+# request_timeout: 10 # Default is no specific timeout by requests library, can be long
+
+# Optional: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_level: "INFO"

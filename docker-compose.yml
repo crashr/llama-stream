@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  reverse_proxy:
+    build: .
+    container_name: llama-stream
+    ports:
+      # Map host port 8070 to container port defined by proxy_port in config.yaml
+      # Ensure the right side matches the 'proxy_port' in your config.yaml
+      # Example: If config.yaml has proxy_port: 8066, then "8066:8066"
+      - "8066:8066" # <host_port>:<container_port_from_config>
+    volumes:
+      # Mount your custom config.yaml into the container
+      # This allows you to change configuration without rebuilding the image.
+      - ./config.yaml:/app/config.yaml:ro # 'ro' for read-only
+    # Optional: For development, you might want to mount your source code
+    # - ./proxy_server.py:/app/proxy_server.py:ro
+    restart: unless-stopped
+    # networks:
+    #   - my_network # If your target_url points to another service in this compose file
+
+# Optional: Define a network if your proxy needs to communicate with other containers
+# defined in this docker-compose file by their service name.
+# networks:
+#   my_network:
+#     driver: bridge
+
+# Example of a backend service (if you want to test locally within docker-compose)
+#  backend_service:
+#    image: kennethreitz/httpbin # A simple HTTP service for testing
+#    container_name: httpbin_backend
+#    networks:
+#      - my_network
+# If you use this, your config.yaml target_url could be: "http://backend_service/anything"
