@@ -8,7 +8,7 @@ When `llama-server` processes a request that results in tool calls, it typically
 
 ## Problem Solved
 
-`llama-server` (from `llama.cpp`) is a fantastic tool for serving local LLMs with an OpenAI-compatible API. However, a current limitation is its handling of streaming responses when `tool_calls` (function calls) are part of the model's output. Instead of streaming the tool call information progressively as OpenAI's API does, `llama-server` often sends the full, non-streamed JSON response.
+`llama-server` (from `llama.cpp`) is a tool for serving local LLMs with an OpenAI-compatible API. However, a current limitation is its handling of streaming responses when `tool_calls` (function calls) are part of the model's output. Instead of streaming the tool call information progressively as OpenAI's API does, `llama-server` often sends the full, non-streamed JSON response.
 
 This proxy addresses this by:
 1.  Forcing `stream: false` in requests to the backend `llama-server` (to ensure it gets the complete response with potential tool calls).
