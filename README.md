@@ -80,3 +80,20 @@ streaming_chunk_size: 50
 # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 log_level: "INFO"
 ```
+
+## Setup and Running
+1. Using Docker Compose (Recommended)
+                       
+This is the easiest way to get the proxy running.
+
+```bash
+git https://github.com/crashr/llama-stream
+cd llama-stream
+```
+
+Before running, copy config.yaml.example to config.yaml and modify it to point to your llama-server instance and set your desired proxy port.
+Ensure target_url points to your llama-server and proxy_port is set as desired. The port mapping in docker-compose.yml assumes the proxy_port inside the container is 8066. If you change proxy_port in config.yaml, update the right side of the port mapping in docker-compose.yml (e.g., ports: - "8066:NEW_PROXY_PORT").
+
+```bash
+docker-compose up --build -d
+```
