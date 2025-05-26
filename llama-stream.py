@@ -299,7 +299,6 @@ def run(config_file="config.yaml"):
 
 if __name__ == "__main__":
     # You could make config_file an argument:
-    # import sys
-    # conf_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
-    # run(conf_file)
-    run()
+    import sys
+    conf_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    run(conf_file)
