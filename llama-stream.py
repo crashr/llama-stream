@@ -186,6 +186,12 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
             content = message.get("content", "")
             tool_calls = message.get("tool_calls", None)
 
+            # Quick fix TODO
+            if tool_calls is not None:
+                for tool_call in tool_calls:
+                    if "index" not in tool_call:
+                        tool_call["index"] = 0
+
             base_event_data = {
                 "id": response_data.get("id", "chatcmpl-default-id"),
                 "object": response_data.get("object", "chat.completion.chunk"), # Simulate chunk object
