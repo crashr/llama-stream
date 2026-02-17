@@ -158,7 +158,9 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(response.content) # response.content would have been read by response.json()
                     return # Exit early as we can't stream this
 
-                for chunk in self._simulate_streaming(response_json_data):
+                usage_info = response_json_data.get("usage")
+                
+                for chunk in self._simulate_streaming(response_json_data, usage_info):
                     self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode('utf-8'))
                     self.wfile.flush()
                 self.wfile.write("data: [DONE]\n\n".encode('utf-8'))
@@ -174,7 +176,7 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                 self.wfile.flush()
 
-    def _simulate_streaming(self, response_data):
+    def _simulate_streaming(self, response_data, usage_info=None):
         """
         Simulates OpenAI-like streaming response from a complete JSON response.
         """
@@ -202,7 +204,7 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
 
             if tool_calls:
                 # Send tool_calls in a single chunk, mimicking OpenAI
-                yield {
+                chunk_data = {
                     **base_event_data,
                     "choices": [
                         {
@@ -216,11 +218,14 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                         }
                     ],
                 }
+                if usage_info:
+                    chunk_data["usage"] = usage_info
+                yield chunk_data
             elif content:
                 # Simulate text streaming
                 for i in range(0, len(content), streaming_chunk_size):
                     text_chunk = content[i:i+streaming_chunk_size]
-                    yield {
+                    chunk_data = {
                         **base_event_data,
                         "choices": [
                             {
@@ -230,8 +235,11 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                             }
                         ],
                     }
+                    if i == 0 and usage_info:
+                        chunk_data["usage"] = usage_info
+                    yield chunk_data
                 # Send the final chunk with finish_reason
-                yield {
+                final_chunk = {
                     **base_event_data,
                     "choices": [
                         {
@@ -241,8 +249,11 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                         }
                     ],  
                 }
+                if usage_info:
+                    final_chunk["usage"] = usage_info
+                yield final_chunk
             else: # Empty content but no tool_calls
-                yield {
+                chunk_data = {
                     **base_event_data,
                     "choices": [
                         {
@@ -252,6 +263,9 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                         }
                     ],
                 }
+                if usage_info:
+                    chunk_data["usage"] = usage_info
+                yield chunk_data
         else: # Non-OpenAI-like structure, or error structure from backend
             logging.warning(f"Response data does not have 'choices' or it's empty. Yielding as is: {response_data}")
             # Yield the original data wrapped in a minimal streaming structure if it's not suitable
