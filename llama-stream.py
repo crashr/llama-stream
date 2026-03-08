@@ -1,10 +1,15 @@
 import http.server
+import socketserver
 import requests
 import json
 import time
 import yaml
 import logging
 from functools import partial
+
+
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
 
 # Global config dictionary
 CONFIG = {}
@@ -56,7 +61,7 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
     def _get_request_timeout(self):
         return self.config.get("request_timeout", None) # None means requests default
 
-    def _perform_request(self, method, path, headers, data=None, json_data=None):
+    def _perform_request(self, method, path, headers, data=None, json_data=None, stream=False):
         target_url = self._get_target_url()
         verify_ssl = self._get_verify_ssl() if target_url.startswith("https://") else True
         timeout = self._get_request_timeout()
@@ -84,7 +89,7 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                 json=json_data,
                 verify=verify_ssl,
                 timeout=timeout,
-                stream=True # Important for handling large responses / streaming
+                stream=stream
             )
             logging.debug(f"Received {response.status_code} from target server.")
             return response
@@ -106,19 +111,18 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
             return None
 
     def do_GET(self):
-        # Basic path check, can be expanded with self.config.get("allowed_get_paths", [])
-        if self.path == "/v1/models": # Or check against a configurable list of paths
+        allowed_paths = self.config.get("allowed_get_paths", ["/v1/models"])
+        if self.path in allowed_paths:
             response = self._perform_request("GET", self.path, self.headers)
             if response:
                 self.send_response(response.status_code)
-                # Forward relevant headers from the backend response
+                content = response.content
                 for key, value in response.headers.items():
-                    if key.lower() in ["content-type", "content-length", "date"]: # Add more if needed
+                    if key.lower() in ["content-type", "date"]:
                         self.send_header(key, value)
+                self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
-                # Stream content
-                for chunk in response.iter_content(chunk_size=8192): # 8KB chunks
-                    self.wfile.write(chunk)
+                self.wfile.write(content)
         else:
             self.send_error(404, "Not Found")
 
@@ -136,45 +140,61 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
             self.send_error(400, "Bad Request: Invalid JSON payload")
             return
 
-        # Original logic: force stream to false for the backend
-        request_data['stream'] = False 
+        # Only force stream:false when tools/structured output are present
+        # (these trigger the llama_grammar_init_impl bug in llama-server)
+        needs_destream = bool(
+            request_data.get('tools')
+            or request_data.get('tool_choice')
+            or request_data.get('response_format')
+        )
+        client_wants_stream = request_data.get('stream', False)
 
-        response = self._perform_request("POST", self.path, self.headers, json_data=request_data)
+        if needs_destream:
+            logging.info("Tools/structured output detected — forcing stream:false for backend")
+            request_data['stream'] = False
+        # else: pass through stream flag as-is
+
+        response = self._perform_request("POST", self.path, self.headers, json_data=request_data, stream=client_wants_stream and not needs_destream)
 
         if response:
-            if response.status_code == 200 and 'application/json' in response.headers.get('Content-Type',''):
-                # If backend responds with 200 and JSON, simulate streaming if it's not already
+            if needs_destream and client_wants_stream and response.status_code == 200 and 'application/json' in response.headers.get('Content-Type',''):
+                # Backend returned complete JSON; re-stream it to the client as SSE
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "close") # Keep-alive can be problematic with naive streaming
+                self.send_header("Connection", "close")
                 self.end_headers()
 
                 try:
                     response_json_data = response.json()
                 except json.JSONDecodeError:
                     logging.error("Backend returned 200 but non-JSON content, cannot simulate stream.")
-                    # Fallback to proxying the raw content if it wasn't JSON
-                    self.wfile.write(response.content) # response.content would have been read by response.json()
-                    return # Exit early as we can't stream this
+                    self.wfile.write(response.content)
+                    return
 
                 usage_info = response_json_data.get("usage")
-                
-                for chunk in self._simulate_streaming(response_json_data, usage_info):
-                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode('utf-8'))
+
+                try:
+                    for chunk in self._simulate_streaming(response_json_data, usage_info):
+                        self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    self.wfile.write("data: [DONE]\n\n".encode('utf-8'))
                     self.wfile.flush()
-                self.wfile.write("data: [DONE]\n\n".encode('utf-8'))
-                self.wfile.flush()
+                except BrokenPipeError:
+                    logging.debug("Client disconnected during simulated streaming")
             else:
-                # Proxy non-200 or non-JSON responses as they are
+                # Pass through: native streaming, non-streaming, or error responses
                 self.send_response(response.status_code)
                 for key, value in response.headers.items():
-                    if key.lower() in ["content-type", "content-length", "date"]: # Add more if needed
+                    if key.lower() in ["content-type", "content-length", "date", "transfer-encoding"]:
                         self.send_header(key, value)
                 self.end_headers()
-                for chunk in response.iter_content(chunk_size=8192):
-                    self.wfile.write(chunk)
-                self.wfile.flush()
+                try:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        self.wfile.write(chunk)
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    logging.debug("Client disconnected during streaming passthrough")
 
     def _simulate_streaming(self, response_data, usage_info=None):
         """
@@ -187,6 +207,7 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
             message = choice.get("message", {})
             content = message.get("content", "")
             tool_calls = message.get("tool_calls", None)
+            reasoning_content = message.get("reasoning_content", "")
 
             # Quick fix TODO
             if tool_calls is not None:
@@ -202,18 +223,39 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                 # system_fingerprint is also common in OpenAI responses
             }
 
+            sent_role = False
+
+            # Stream reasoning_content first (thinking/reasoning from models like Qwen, DeepSeek)
+            if reasoning_content:
+                for i in range(0, len(reasoning_content), streaming_chunk_size):
+                    text_chunk = reasoning_content[i:i+streaming_chunk_size]
+                    delta = {"reasoning_content": text_chunk}
+                    if not sent_role:
+                        delta["role"] = "assistant"
+                        sent_role = True
+                    chunk_data = {
+                        **base_event_data,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield chunk_data
+
             if tool_calls:
                 # Send tool_calls in a single chunk, mimicking OpenAI
+                delta = {"content": None, "tool_calls": tool_calls}
+                if not sent_role:
+                    delta["role"] = "assistant"
                 chunk_data = {
                     **base_event_data,
                     "choices": [
                         {
                             "index": 0,
-                            "delta": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": tool_calls,
-                            },
+                            "delta": delta,
                             "finish_reason": "tool_calls",
                         }
                     ],
@@ -225,12 +267,16 @@ class ReverseProxy(http.server.BaseHTTPRequestHandler):
                 # Simulate text streaming
                 for i in range(0, len(content), streaming_chunk_size):
                     text_chunk = content[i:i+streaming_chunk_size]
+                    delta = {"content": text_chunk}
+                    if i == 0 and not sent_role:
+                        delta["role"] = "assistant"
+                        sent_role = True
                     chunk_data = {
                         **base_event_data,
                         "choices": [
                             {
                                 "index": 0,
-                                "delta": {"role": "assistant", "content": text_chunk} if i == 0 else {"content": text_chunk},
+                                "delta": delta,
                                 "finish_reason": None,
                             }
                         ],
@@ -303,7 +349,7 @@ def run(config_file="config.yaml"):
     # This is a cleaner way than relying on globals within the class instances
     HandlerWithConfig = partial(ReverseProxy, config=CONFIG)
     
-    httpd = http.server.HTTPServer(server_address, HandlerWithConfig)
+    httpd = ThreadedHTTPServer(server_address, HandlerWithConfig)
     logging.info(f"Starting reverse proxy on port {proxy_port}...")
     logging.info(f"Targeting backend: {CONFIG.get('target_url')}")
     if CONFIG.get('target_url', '').startswith("https://"):
